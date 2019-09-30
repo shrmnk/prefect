@@ -13,6 +13,20 @@ from prefect import context
 from prefect.engine.executors.base import Executor
 
 
+def collect_worker_logs(flow_run_id):
+    def _collect_logs():
+        import logging
+        import prefect
+
+        class DaskPrefectLogger(prefect.utilities.logging.CloudHandler):
+            def emit(self, *args, **kwargs):
+                with prefect.context(flow_run_id=flow_run_id):
+                    super().emit(*args, **kwargs)
+
+        distributed = logging.getLogger("distributed")
+        distributed.addHandler(DaskPrefectLogger())
+
+
 class DaskExecutor(Executor):
     """
     An executor that runs all functions using the `dask.distributed` scheduler on
@@ -75,6 +89,10 @@ class DaskExecutor(Executor):
             ) as client:
                 self.client = client
                 self.is_started = True
+                if context.get("flow_run_id"):
+                    self.client.register_worker_callbacks(
+                        collect_worker_logs(context["flow_run_id"])
+                    )
                 yield self.client
         finally:
             self.client = None
